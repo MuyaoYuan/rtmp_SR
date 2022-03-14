@@ -7,9 +7,10 @@ import numpy as np
 import cv2 as cv
 
 class Decoder(multiprocessing.Process):
-    def __init__(self, url, config, new_frame_lock, image_queue, fps_count=False, record=False):
+    def __init__(self, url, config, new_frame_event, new_frame_lock, image_queue, fps_count=False, record=False):
         self.url = url
         self.config = config
+        self.new_frame_event = new_frame_event
         self.new_frame_lock = new_frame_lock
         self.fps_count = fps_count
         self.record = record
@@ -25,10 +26,12 @@ class Decoder(multiprocessing.Process):
         self.start()
 
     def run(self):
-        is_first_frame = True
         print('Opening input stream...')
-        frameCount = 0
-        display_start_time = time.time()
+        # 计算解码的fps
+        if self.fps_count:
+            is_first_frame = True
+            frameCount = 0
+            display_start_time = time.time()
         # 录制视频
         if self.record:
             out = cv.VideoWriter('out.flv', cv.VideoWriter_fourcc('F', 'L', 'V', '1'), 
@@ -48,11 +51,14 @@ class Decoder(multiprocessing.Process):
 
             # 将新的一帧放入队列，队列中永远只存在当前帧
             self.new_frame_lock.acquire()
+            print(id(self.image_queue))
             if len(self.image_queue) > 0:
                 self.image_queue[0] = new_frame
             else:
                 self.image_queue.append(new_frame)
+            # print("Queue in decoder, the length of queue:{}".format(len(self.image_queue)))
             self.new_frame_lock.release()
+            self.new_frame_event.set()
 
             # 计算解码的fps
             if self.fps_count:

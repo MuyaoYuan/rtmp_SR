@@ -1,17 +1,27 @@
 import torch
 from torchvision.transforms.transforms import ToTensor
+import numpy as np
 import cv2 as cv
+import multiprocessing
+import time
 
 from model.ESPCN import ESPCN
 from model.ESPCN_modified import ESPCN_modified
 from model.ESPCN_multiframe import ESPCN_multiframe
 
 from decoder import Decoder
+from option import args
+
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 
 class SR:
-    def __init__(self, args, config, record=False, image_queue=None):
+    def __init__(self, args, config, new_frame_event, new_frame_lock, image_queue, fps_count=False, record=False):
         self.args = args
         self.config = config
+        self.new_frame_event = new_frame_event
+        self.new_frame_lock = new_frame_lock
+        self.image_queue = image_queue
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # select model
         self.model_name = args.model
@@ -32,24 +42,68 @@ class SR:
         if record:
             self.out = cv.VideoWriter('out.flv', cv.VideoWriter_fourcc('F', 'L', 'V', '1'), 
                                     self.config['fps'], (self.config['width'] * args.scale, self.config['height'] * args.scale))
+        
+        # 计算超分的fps
+        if fps_count:
+            is_first_frame = True
+            display_start_time = time.time()
+            frameCount = 0
 
-        if image_queue:
-            while True:
-                frame = image_queue.pop()
-                frame_in = self.transform(frame)
-                frame_in = frame_in.to(self.device)
-                frame_in = frame_in.view(1, *frame_in.size())
-                frame_out = self.model(frame_in)
-                frame_process = frame_out_process(frame_out)
-                if record:
-                    frame_process = frame_process[:,:,::-1]
-                    self.out.write(frame_process)
+       
+        # Event对象用于线程间通信。用于主线程控制其他线程的执行，事件主要提供了四个方法wait、clear、set、isSet
+        # set()：可设置Event对象内部的信号标志为True
+        # clear()：可清除Event对象内部的信号标志为False
+        # isSet()：Event对象提供了isSet()方法来判断内部的信号标志的状态。当使用set()后，isSet()方法返回True；当使用clear()后，isSet()方法返回False
+        # wait()：该方法只有在内部信号为True的时候才会被执行并完成返回。当内部信号标志为False时，则wait()一直等待到其为True时才返回
+
+        while True:
+            new_frame_event.wait()
+            self.new_frame_lock.acquire()
+            print(id(self.image_queue))
+            frame = self.image_queue.pop()
+            new_frame_event.clear()
+            self.new_frame_lock.release()
+
+            frame_in = self.transform(frame)
+            frame_in = frame_in.to(self.device)
+            frame_in = frame_in.view(1, *frame_in.size())
+            frame_out = self.model(frame_in)
+            frame_process = frame_out_process(frame_out)
+
+            if record:
+                frame_process = frame_process[:,:,::-1]
+                self.out.write(frame_process)
+            
+            # 计算超分的fps
+            if fps_count:
+                if is_first_frame:
+                    is_first_frame = False
+                    display_start_time = time.time()
+                    frameCount = 0
+                else:
+                    frameCount += 1
+                    rightNow = time.time()
+                    fps = 1*frameCount / (rightNow - display_start_time)
+                    print('SR FPS: ' + str(fps))
+        
         if record:
             self.out.release()
 
-        def frame_out_process(frame_out):
-            frame_process = frame_out
-            return frame_process
+def frame_out_process(frame_out):
+        frame_array = np.uint8(frame_out.cpu().detach().numpy()*255)
+        frame_array = frame_array.transpose((0,2,3,1))
+        frame_process = frame_array[0]
+        return frame_process
 
 if __name__ == '__main__':
-    pass
+    url = 'kanna.mp4'
+    config = {
+        'width':1920,
+        'height':1080,
+        'fps':60
+    }
+    new_frame_lock = multiprocessing.Lock()
+    new_frame_event = multiprocessing.Event()
+    image_queue = list()
+    decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, fps_count=False, record=False)
+    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, fps_count=True, record=True)

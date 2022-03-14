@@ -1,13 +1,17 @@
 import torch
 from torchvision.transforms.transforms import ToTensor
+import cv2 as cv
 
 from model.ESPCN import ESPCN
 from model.ESPCN_modified import ESPCN_modified
 from model.ESPCN_multiframe import ESPCN_multiframe
 
+from decoder import Decoder
+
 class SR:
-    def __init__(self, args):
+    def __init__(self, args, config, record=False, image_queue=None):
         self.args = args
+        self.config = config
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # select model
         self.model_name = args.model
@@ -25,13 +29,27 @@ class SR:
         # print(self.save_path)
         self.model.load_state_dict(torch.load(self.save_path))
         self.transform = ToTensor()
+        if record:
+            self.out = cv.VideoWriter('out.flv', cv.VideoWriter_fourcc('F', 'L', 'V', '1'), 
+                                    self.config['fps'], (self.config['width'] * args.scale, self.config['height'] * args.scale))
 
-    def doSR(self, frame, frame_out_process):
-        frame_in = self.transform(frame)
-        frame_in = frame_in.to(self.device)
-        frame_in = frame_in.view(1, *frame_in.size())
-        frame_out = self.model(frame_in)
-        frame_process = frame_out_process(frame_out)
+        if image_queue:
+            while True:
+                frame = image_queue.pop()
+                frame_in = self.transform(frame)
+                frame_in = frame_in.to(self.device)
+                frame_in = frame_in.view(1, *frame_in.size())
+                frame_out = self.model(frame_in)
+                frame_process = frame_out_process(frame_out)
+                if record:
+                    frame_process = frame_process[:,:,::-1]
+                    self.out.write(frame_process)
+        if record:
+            self.out.release()
 
-        return frame_process
+        def frame_out_process(frame_out):
+            frame_process = frame_out
+            return frame_process
 
+if __name__ == '__main__':
+    pass

@@ -1,11 +1,12 @@
 import sys
 from subprocess import Popen, PIPE
-import threading
+# import threading
+import multiprocessing
 import time
 import numpy as np
 import cv2 as cv
 
-class Decoder(threading.Thread):
+class Decoder(multiprocessing.Process):
     def __init__(self, url, config, new_frame_lock, image_queue, fps_count=False, record=False):
         self.url = url
         self.config = config
@@ -17,8 +18,8 @@ class Decoder(threading.Thread):
         self.in_process = Popen(self.commandline, shell=True, stdout=PIPE, stderr=sys.stderr)
         # print(self.commandline)
 
-        # Start the thread
-        threading.Thread.__init__(self)
+        # Start the Process
+        multiprocessing.Process.__init__(self)
         # 守护进程：设置为daemon的线程会随着主线程的退出而结束，而非daemon线程会阻塞主线程的退出。
         self.daemon = True
         self.start()
@@ -76,7 +77,7 @@ if __name__ == '__main__':
         'height':1080,
         'fps':60
     }
-    new_frame_lock = threading.Lock()
+    new_frame_lock = multiprocessing.Lock()
     image_queue = list()
     decoder = Decoder(url=url, config=config, new_frame_lock=new_frame_lock, image_queue=image_queue, fps_count=True ,record=True)
     while True:

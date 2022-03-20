@@ -13,10 +13,10 @@ from decoder import Decoder
 from option import args
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 class SR:
-    def __init__(self, args, config, new_frame_event, new_frame_lock, image_queue, fps_count=False, record=False):
+    def __init__(self, args, config, new_frame_event, new_frame_lock, image_queue, debug=False, record=False):
         self.args = args
         self.config = config
         self.new_frame_event = new_frame_event
@@ -44,7 +44,7 @@ class SR:
                                     self.config['fps'], (self.config['width'] * args.scale, self.config['height'] * args.scale))
         
         # 计算超分的fps
-        if fps_count:
+        if debug:
             is_first_frame = True
             display_start_time = time.time()
             frameCount = 0
@@ -57,11 +57,18 @@ class SR:
         # wait()：该方法只有在内部信号为True的时候才会被执行并完成返回。当内部信号标志为False时，则wait()一直等待到其为True时才返回
 
         while True:
-            new_frame_event.wait()
+            # self.new_frame_event.wait()
             self.new_frame_lock.acquire()
-            print(id(self.image_queue))
-            frame = self.image_queue.pop()
-            new_frame_event.clear()
+            # print(id(self.image_queue))
+            try:
+                frame = self.image_queue.get(block=False)  # 取一个值,队列为空立马抛出异常
+            except Exception:
+                if debug:
+                    print("队列已空")
+                # self.new_frame_event.clear()
+                self.new_frame_lock.release()
+                continue
+            # self.new_frame_event.clear()
             self.new_frame_lock.release()
 
             frame_in = self.transform(frame)
@@ -71,11 +78,11 @@ class SR:
             frame_process = frame_out_process(frame_out)
 
             if record:
-                frame_process = frame_process[:,:,::-1]
-                self.out.write(frame_process)
+                record_frame = frame_process[:,:,::-1]
+                self.out.write(record_frame)
             
             # 计算超分的fps
-            if fps_count:
+            if debug:
                 if is_first_frame:
                     is_first_frame = False
                     display_start_time = time.time()
@@ -96,14 +103,21 @@ def frame_out_process(frame_out):
         return frame_process
 
 if __name__ == '__main__':
-    url = 'kanna.mp4'
+    # url = 'kanna.mp4'
+    url = 'HelloWorldRecorded.webm'
+    # config = {
+    #     'width':1920,
+    #     'height':1080,
+    #     'fps':60
+    # }
     config = {
-        'width':1920,
-        'height':1080,
-        'fps':60
+            'width':640,
+            'height':480,
+            'fps':30
     }
     new_frame_lock = multiprocessing.Lock()
     new_frame_event = multiprocessing.Event()
-    image_queue = list()
-    decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, fps_count=False, record=False)
-    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, fps_count=True, record=True)
+    new_frame_event.clear()
+    image_queue = multiprocessing.Queue() # 设置最大项数为10
+    decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=False, record=False)
+    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=False, record=True)

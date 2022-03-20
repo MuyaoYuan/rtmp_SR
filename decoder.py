@@ -7,12 +7,12 @@ import numpy as np
 import cv2 as cv
 
 class Decoder(multiprocessing.Process):
-    def __init__(self, url, config, new_frame_event, new_frame_lock, image_queue, fps_count=False, record=False):
+    def __init__(self, url, config, new_frame_event, new_frame_lock, image_queue, debug=False, record=False):
         self.url = url
         self.config = config
         self.new_frame_event = new_frame_event
         self.new_frame_lock = new_frame_lock
-        self.fps_count = fps_count
+        self.debug = debug
         self.record = record
         self.image_queue = image_queue
         self.commandline = 'ffmpeg -hide_banner -loglevel panic -i {url_} -f rawvideo -pix_fmt rgb24 -'.format(url_=self.url)
@@ -28,7 +28,7 @@ class Decoder(multiprocessing.Process):
     def run(self):
         print('Opening input stream...')
         # 计算解码的fps
-        if self.fps_count:
+        if self.debug:
             is_first_frame = True
             frameCount = 0
             display_start_time = time.time()
@@ -46,22 +46,26 @@ class Decoder(multiprocessing.Process):
             
             # 录制
             if self.record:
-                new_frame = new_frame[:,:,::-1]
-                out.write(new_frame)
+                record_frame = new_frame[:,:,::-1]
+                out.write(record_frame)
 
             # 将新的一帧放入队列，队列中永远只存在当前帧
             self.new_frame_lock.acquire()
-            print(id(self.image_queue))
-            if len(self.image_queue) > 0:
-                self.image_queue[0] = new_frame
-            else:
-                self.image_queue.append(new_frame)
-            # print("Queue in decoder, the length of queue:{}".format(len(self.image_queue)))
+            # print(id(self.image_queue))
+            try:
+                self.image_queue.put(new_frame,block=False)
+            except:
+                if self.debug:
+                    print('队列已满')
+                # self.image_queue.get()
+                # self.image_queue.put(new_frame,block=False)
+            if self.debug:
+                print("Queue in decoder, the length of queue:{}".format(self.image_queue.qsize()))
             self.new_frame_lock.release()
-            self.new_frame_event.set()
+            # self.new_frame_event.set()
 
             # 计算解码的fps
-            if self.fps_count:
+            if self.debug:
                 if is_first_frame:
                     is_first_frame = False
                     display_start_time = time.time()
@@ -77,15 +81,23 @@ class Decoder(multiprocessing.Process):
 
 
 if __name__ == '__main__':
-    url = 'kanna10.mp4'
+    # url = 'kanna10.mp4'
+    url = 'HelloWorldRecorded.webm'
+    # config = {
+    #     'width':1920,
+    #     'height':1080,
+    #     'fps':60
+    # }
     config = {
-        'width':1920,
-        'height':1080,
-        'fps':60
+            'width':640,
+            'height':480,
+            'fps':30
     }
     new_frame_lock = multiprocessing.Lock()
-    image_queue = list()
-    decoder = Decoder(url=url, config=config, new_frame_lock=new_frame_lock, image_queue=image_queue, fps_count=True ,record=True)
+    new_frame_event = multiprocessing.Event()
+    new_frame_event.clear()
+    image_queue = multiprocessing.Queue() # 设置最大项数为10
+    decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=True ,record=False)
     while True:
-        # print(len(image_queue))
+        # print(image_queue.qsize())
         pass

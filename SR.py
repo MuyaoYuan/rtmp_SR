@@ -13,7 +13,7 @@ from decoder import Decoder
 from option import args
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 class SR:
     def __init__(self, args, config, new_frame_event, new_frame_lock, image_queue, debug=False, record=False):
@@ -23,8 +23,16 @@ class SR:
         self.new_frame_lock = new_frame_lock
         self.image_queue = image_queue
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
         # select model
         self.model_name = args.model
+        if(self.model_name == 'ESPCN' or self.model_name == 'ESPCN_modified'):
+            self.mutilframe = False
+        elif(self.model_name == 'ESPCN_multiframe' or self.model_name == 'ESPCN_multiframe2' or self.model_name == 'VESPCN'):
+            self.mutilframe = True
+            self.workQueue = list()
+            self.queueIndex = 0
+
         if(self.model_name == 'ESPCN'):
             self.model = ESPCN(n_colors=args.n_colors, scale=args.scale).to(self.device)
         elif(self.model_name == 'ESPCN_modified'):
@@ -71,11 +79,29 @@ class SR:
             # self.new_frame_event.clear()
             self.new_frame_lock.release()
 
-            frame_in = self.transform(frame)
-            frame_in = frame_in.to(self.device)
-            frame_in = frame_in.view(1, *frame_in.size())
-            frame_out = self.model(frame_in)
-            frame_process = frame_out_process(frame_out)
+            if self.mutilframe:
+                if(len(self.workQueue)<3):
+                    self.workQueue.append(frame)
+                    self.queueIndex = (self.queueIndex + 1) % args.n_sequence
+                    continue
+                else:
+                    self.workQueue[self.queueIndex] = frame
+                    self.queueIndex = (self.queueIndex + 1) % args.n_sequence
+
+                    frames = list()
+                    for i in range(args.n_sequence):
+                        frames.append(self.transform(self.workQueue[(self.queueIndex + i) % args.n_sequence]).to(self.device))
+                    
+                    frames_in = torch.stack(frames, dim=0)
+                    frames_in = frames_in.view(1, *frames_in.size())
+                    frame_out = self.model(frames_in)
+                    frame_process = frame_out_process(frame_out)
+            else:
+                frame_in = self.transform(frame)
+                frame_in = frame_in.to(self.device)
+                frame_in = frame_in.view(1, *frame_in.size())
+                frame_out = self.model(frame_in)
+                frame_process = frame_out_process(frame_out)
 
             if record:
                 record_frame = frame_process[:,:,::-1]
@@ -102,6 +128,7 @@ def frame_out_process(frame_out):
         frame_process = frame_array[0]
         return frame_process
 
+
 if __name__ == '__main__':
     # url = 'kanna.mp4'
     url = 'HelloWorldRecorded.webm'
@@ -120,4 +147,4 @@ if __name__ == '__main__':
     new_frame_event.clear()
     image_queue = multiprocessing.Queue() # 设置最大项数为10
     decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=False, record=False)
-    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=False, record=True)
+    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=True, record=True)

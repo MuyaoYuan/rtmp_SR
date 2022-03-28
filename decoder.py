@@ -15,7 +15,19 @@ class Decoder(multiprocessing.Process):
         self.debug = debug
         self.record = record
         self.image_queue = image_queue
-        self.commandline = 'ffmpeg -hide_banner -loglevel panic -i {url_} -f rawvideo -pix_fmt rgb24 -'.format(url_=self.url)
+        self.commandline = 'ffmpeg\
+                        -hide_banner\
+                        -loglevel panic\
+                        -protocol_whitelist \"file,http,https,rtp,udp,tcp,tls\"\
+                        -i {url_}\
+                        -f rawvideo\
+                        -vf scale={width_}x{height_}:flags=lanczos\
+                        -pix_fmt rgb24\
+                        -r {fps_} -'\
+                        .format(url_=self.url,
+                                width_=self.config['width'],
+                                height_=self.config['height'],
+                                fps_=self.config['fps'])
         self.in_process = Popen(self.commandline, shell=True, stdout=PIPE, stderr=sys.stderr)
         # print(self.commandline)
 
@@ -40,8 +52,9 @@ class Decoder(multiprocessing.Process):
             # 获取每一帧图像
             in_bytes = self.in_process.stdout.read(self.config['width'] * self.config['height'] * 3)
             if not in_bytes:
-                print('NO MORE BYTES')
-                break
+                if self.debug:
+                    print('NO MORE BYTES')
+                continue
             new_frame = np.frombuffer(in_bytes, np.uint8).reshape([self.config['height'], self.config['width'], 3])
             
             # 录制
@@ -82,22 +95,29 @@ class Decoder(multiprocessing.Process):
 
 if __name__ == '__main__':
     # url = 'kanna10.mp4'
-    url = 'HelloWorldRecorded.webm'
+    # url = 'HelloWorldRecorded.webm'
+    # url = 'rtmp://localhost/tv/264663camera'
+    url = 'test.sdp'
     # config = {
     #     'width':1920,
     #     'height':1080,
     #     'fps':60
     # }
+    # config = {
+    #         'width':640,
+    #         'height':480,
+    #         'fps':30
+    # }
     config = {
-            'width':640,
-            'height':480,
+            'width':160,
+            'height':90,
             'fps':30
     }
     new_frame_lock = multiprocessing.Lock()
     new_frame_event = multiprocessing.Event()
     new_frame_event.clear()
     image_queue = multiprocessing.Queue() # 设置最大项数为10
-    decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=True ,record=False)
+    decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=True ,record=True)
     while True:
         # print(image_queue.qsize())
         pass

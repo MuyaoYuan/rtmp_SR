@@ -2,6 +2,8 @@ import torch
 from torchvision.transforms.transforms import ToTensor
 import numpy as np
 import cv2 as cv
+import sys
+from subprocess import Popen, PIPE
 import multiprocessing
 import time
 
@@ -12,8 +14,8 @@ from model.ESPCN_multiframe import ESPCN_multiframe
 from decoder import Decoder
 from option import args
 
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 class SR:
     def __init__(self, args, config, new_frame_event, new_frame_lock, image_queue, debug=False, record=False):
@@ -23,6 +25,19 @@ class SR:
         self.new_frame_lock = new_frame_lock
         self.image_queue = image_queue
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.commandline = 'ffmpeg\
+                            -hide_banner\
+                            -f rawvideo\
+                            -pixel_format rgb24\
+                            -video_size {width_}x{height_}\
+                            -r {fps_}\
+                            -i - \
+                            -r {fps_}\
+                            -f flv\
+                            rtmp://127.0.0.1/tv/test'\
+                            .format(width_=self.config['width']*args.scale,
+                                    height_=self.config['height']*args.scale,
+                                    fps_=self.config['fps'])
 
         # select model
         self.model_name = args.model
@@ -45,8 +60,11 @@ class SR:
         self.save_path = 'trained_model/' + self.model_name + '/' + self.model_name + '.pkl'
         # model reload
         # print(self.save_path)
-        self.model.load_state_dict(torch.load(self.save_path))
+        self.model.load_state_dict(torch.load(self.save_path,map_location=self.device))
         self.transform = ToTensor()
+
+        self.out_process = Popen(self.commandline, shell=True, stdin=PIPE, stderr=sys.stderr)
+        
         if record:
             self.out = cv.VideoWriter('out.flv', cv.VideoWriter_fourcc('F', 'L', 'V', '1'), 
                                     self.config['fps'], (self.config['width'] * args.scale, self.config['height'] * args.scale))
@@ -103,9 +121,11 @@ class SR:
                 frame_out = self.model(frame_in)
                 frame_process = frame_out_process(frame_out)
 
+            rgb_frame = frame_process[:,:,::-1]
             if record:
-                record_frame = frame_process[:,:,::-1]
-                self.out.write(record_frame)
+                self.out.write(rgb_frame)
+
+            self.out_process.stdin.write(rgb_frame.tobytes())
             
             # 计算超分的fps
             if debug:
@@ -131,15 +151,22 @@ def frame_out_process(frame_out):
 
 if __name__ == '__main__':
     # url = 'kanna.mp4'
-    url = 'HelloWorldRecorded.webm'
+    # url = 'HelloWorldRecorded.webm'
+    # url = 'rtmp://localhost/tv/264663camera'
+    url = 'test.sdp'
     # config = {
     #     'width':1920,
     #     'height':1080,
     #     'fps':60
     # }
+    # config = {
+    #         'width':640,
+    #         'height':480,
+    #         'fps':30
+    # }
     config = {
-            'width':640,
-            'height':480,
+            'width':160,
+            'height':90,
             'fps':30
     }
     new_frame_lock = multiprocessing.Lock()
@@ -147,4 +174,4 @@ if __name__ == '__main__':
     new_frame_event.clear()
     image_queue = multiprocessing.Queue() # 设置最大项数为10
     decoder = Decoder(url=url, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=False, record=False)
-    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=True, record=True)
+    sr = SR(args=args, config=config, new_frame_event=new_frame_event, new_frame_lock=new_frame_lock, image_queue=image_queue, debug=True, record=False)

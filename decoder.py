@@ -53,16 +53,16 @@ class Decoder(multiprocessing.Process):
             in_bytes = self.in_process.stdout.read(self.config['width'] * self.config['height'] * 3)
             if not in_bytes:
                 if self.debug:
-                    print('NO MORE BYTES')
+                    print('NO MORE BYTES IN PIPE')
                 continue
             new_frame = np.frombuffer(in_bytes, np.uint8).reshape([self.config['height'], self.config['width'], 3])
             
             # 录制
             if self.record:
-                record_frame = new_frame[:,:,::-1]
-                out.write(record_frame)
+                bgr_frame = new_frame[:,:,::-1]
+                out.write(bgr_frame)
 
-            # 将新的一帧放入队列，队列中永远只存在当前帧
+            # 将新的一帧放入队列
             self.new_frame_lock.acquire()
             # print(id(self.image_queue))
             try:
@@ -70,8 +70,6 @@ class Decoder(multiprocessing.Process):
             except:
                 if self.debug:
                     print('队列已满')
-                # self.image_queue.get()
-                # self.image_queue.put(new_frame,block=False)
             if self.debug:
                 print("Queue in decoder, the length of queue:{}".format(self.image_queue.qsize()))
             self.new_frame_lock.release()

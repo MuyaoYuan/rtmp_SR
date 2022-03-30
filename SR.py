@@ -25,7 +25,7 @@ class SR:
         self.new_frame_lock = new_frame_lock
         self.image_queue = image_queue
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.commandline = 'ffmpeg\
+        self.pipe_out = 'ffmpeg\
                             -hide_banner\
                             -f rawvideo\
                             -pixel_format rgb24\
@@ -63,7 +63,7 @@ class SR:
         self.model.load_state_dict(torch.load(self.save_path,map_location=self.device))
         self.transform = ToTensor()
 
-        self.out_process = Popen(self.commandline, shell=True, stdin=PIPE, stderr=sys.stderr)
+        self.out_process = Popen(self.pipe_out, shell=True, stdin=PIPE, stderr=sys.stderr)
         
         if record:
             self.out = cv.VideoWriter('out.flv', cv.VideoWriter_fourcc('F', 'L', 'V', '1'), 
@@ -121,11 +121,12 @@ class SR:
                 frame_out = self.model(frame_in)
                 frame_process = frame_out_process(frame_out)
 
-            rgb_frame = frame_process[:,:,::-1]
+            
             if record:
-                self.out.write(rgb_frame)
+                bgr_frame = frame_process[:,:,::-1]
+                self.out.write(bgr_frame)
 
-            self.out_process.stdin.write(rgb_frame.tobytes())
+            self.out_process.stdin.write(frame_process.tobytes())
             
             # 计算超分的fps
             if debug:
